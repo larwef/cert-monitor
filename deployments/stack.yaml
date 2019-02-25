@@ -1,0 +1,139 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  Repo:
+    Description: Repo where buildt code is kept
+    Type: String
+  Version:
+    Description: The version of app to deploy
+    Type: String
+
+Resources:
+  # Cognito
+
+  # This does not provide everything needed. These additional steps is needed to set up Oauth:
+  # 1. Go to App Integration -> Domain Name and choose a domain name.
+  # 2. Go to App Integration -> Resource Servers add a resource server and define scopes. (Eg. cert/searchCert)
+  # 3. Go to App Integration -> App Client Settings, check Cognito User Pool, check Client Credentials and choose your scope under Allowed Custom scopes
+
+  CertSearchUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: "certSearchPool"
+
+  CertSearchClient:
+    Type: "AWS::Cognito::UserPoolClient"
+    Properties:
+      ClientName: "certSearchClient"
+      GenerateSecret: true
+      UserPoolId: !Ref CertSearchUserPool
+      RefreshTokenValidity: 7
+
+# Lambda
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "lambda.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: "logging"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: [
+                  "logs:CreateLogGroup",
+                  "logs:CreateLogStream",
+                  "logs:PutLogEvents"
+                ]
+                Resource: [
+                  "arn:aws:logs:*:*:*"
+                ]
+
+  CertSearchLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: "certSearchLambda"
+      Code:
+        S3Bucket: !ref Repo
+        S3Key: !Sub "certSearch/certsearch-${Version}-lambda-deployment.zip"
+      Handler: "main"
+      MemorySize: 512
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: "go1.x"
+      Timeout: 30
+
+  ApiLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !GetAtt CertSearchLambda.Arn
+      Principal: "apigateway.amazonaws.com"
+
+  # Api Gateway
+  
+  # To run the webapp locally enable cors. Easiest is to do it manually in the environment you want to test againts
+
+  CertSearchAPI:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: "CertSearchAPI"
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  ApiAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      IdentitySource: "method.request.header.Authorization"
+      Name: "certAuthorizer"
+      ProviderARNs:
+        - !GetAtt CertSearchUserPool.Arn
+      RestApiId: !Ref CertSearchAPI
+      Type: COGNITO_USER_POOLS
+  
+  ApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizerId: !Ref ApiAuthorizer
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizationScopes:
+        - "cert/search"
+      HttpMethod: POST
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri: !Join [ "", [!Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/", !GetAtt CertSearchLambda.Arn, "/invocations" ]]
+        IntegrationResponses:
+          - StatusCode: 200
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: "Empty"
+      ResourceId: !GetAtt CertSearchAPI.RootResourceId
+      RestApiId: !Ref CertSearchAPI
+
+  ApiDeployment:
+    DependsOn: ApiMethod
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref CertSearchAPI
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      CacheClusterEnabled: false
+      DeploymentId: !Ref ApiDeployment
+      RestApiId: !Ref CertSearchAPI
+      MethodSettings:
+        - ResourcePath: /
+          HttpMethod: "POST"
+          ThrottlingBurstLimit: 50
+          ThrottlingRateLimit: 100
+      StageName: "Main"

@@ -1,0 +1,4 @@
+/target
+*.wasm
+configs/config.json
+cmd/webapp/config.go

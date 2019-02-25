@@ -1,0 +1,19 @@
+.outerWrapper {
+  max-height: 100%;
+}
+
+.innerWrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 10%;
+}
+
+table, th, td {
+  border: 1px solid black;
+  padding: 2px;
+}
+
+tr:nth-child(even) {
+  background-color: #a3a8af;
+}

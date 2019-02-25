@@ -1,0 +1,9 @@
+{
+    "endpoint": "<yourEndpoint>",
+    "clientId": "<youClientId>",
+    "clientSecret": "<yourClientSecret>",
+    "tokenUrl": "<yourTokenUrl>",
+    "scopes": [
+        "cert/search"
+    ]
+}
