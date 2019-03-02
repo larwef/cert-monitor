@@ -32,7 +32,14 @@ func New(conf *config.Config) *Webapp {
 func (w *Webapp) Run() {
 	c := make(chan struct{}, 0)
 	log.Println("Started webapp")
-	js.Global().Set("searchCerts", js.NewCallback(w.searchCerts))
+
+	var cb js.Func
+	cb = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		w.searchCerts()
+		return nil
+	})
+
+	js.Global().Get("document").Call("getElementById", "searchButton").Call("addEventListener", "click", cb)
 	<-c
 }
 
@@ -41,8 +48,7 @@ type reqWrap struct {
 	env string
 }
 
-func (w *Webapp) searchCerts(i []js.Value) {
-	// Spawn seperate thread because the webcall will block the event loop and cause a deadlock.
+func (w *Webapp) searchCerts() {
 	go func() {
 		tableBody.Set("innerHTML", "")
 

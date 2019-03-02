@@ -62,7 +62,7 @@ Resources:
       FunctionName: "certSearchLambda"
       Code:
         S3Bucket: !ref Repo
-        S3Key: !Sub "certSearch/certsearch-${Version}-lambda-deployment.zip"
+        S3Key: !Sub "certSearch/lambda/certsearch-${Version}-lambda-deployment.zip"
       Handler: "main"
       MemorySize: 512
       Role: !GetAtt LambdaRole.Arn
@@ -78,7 +78,7 @@ Resources:
 
   # Api Gateway
   
-  # To run the webapp locally enable cors. Easiest is to do it manually in the environment you want to test againts
+  #  Enable cors to run the webapp locally. Easiest is to do it manually in the environment you want to test againts.
 
   CertSearchAPI:
     Type: AWS::ApiGateway::RestApi

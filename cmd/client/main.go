@@ -19,6 +19,10 @@ func main() {
 		log.Fatalf("Error: %v", err)
 	}
 
+	if len(res.Certs) < 1 {
+		log.Println("No results returned")
+	}
+
 	for _, elem := range res.Certs {
 		log.Printf("%+v\n", elem)
 	}
