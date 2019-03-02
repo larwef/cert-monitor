@@ -1,12 +1,21 @@
 AWSTemplateFormatVersion: "2010-09-09"
 
+# CORS have to be set manually for now
+
+# TODO: Make this configurable by a file
 Parameters:
   Repo:
     Description: Repo where buildt code is kept
     Type: String
+    Default: "repo.wefald.no"
   Version:
     Description: The version of app to deploy
     Type: String
+    Default: "v0.0.2"
+  BucketName:
+    Description: Name of the bucket containing the webapp
+    Type: String
+    Default: "cert.wefald.no"
 
 Resources:
   # Cognito
@@ -61,7 +70,7 @@ Resources:
     Properties:
       FunctionName: "certSearchLambda"
       Code:
-        S3Bucket: !ref Repo
+        S3Bucket: !Ref Repo
         S3Key: !Sub "certSearch/lambda/certsearch-${Version}-lambda-deployment.zip"
       Handler: "main"
       MemorySize: 512
@@ -137,3 +146,29 @@ Resources:
           ThrottlingBurstLimit: 50
           ThrottlingRateLimit: 100
       StageName: "Main"
+
+# S3
+  WebappBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: PublicRead
+      BucketName: !Ref BucketName
+      WebsiteConfiguration: 
+        IndexDocument: "index.html"
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      PolicyDocument:
+        Id: PublicObjectsPolicy
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal: "*"
+            Action: [
+              "s3:GetObject"
+            ]
+            Resource: [
+              !Join ["", [!GetAtt WebappBucket.Arn, "/*"]]
+            ]
+      Bucket: !Ref WebappBucket

@@ -40,6 +40,9 @@ func (w *Webapp) Run() {
 	})
 
 	js.Global().Get("document").Call("getElementById", "searchButton").Call("addEventListener", "click", cb)
+
+	js.Global().Get("document").Call("getElementById", "searchButton").Set("disabled", false)
+
 	<-c
 }
 
