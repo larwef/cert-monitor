@@ -1,174 +1,191 @@
 AWSTemplateFormatVersion: "2010-09-09"
 
 # CORS have to be set manually for now
-
-# TODO: Make this configurable by a file
 Parameters:
-  Repo:
-    Description: Repo where buildt code is kept
-    Type: String
-    Default: "repo.wefald.no"
-  Version:
-    Description: The version of app to deploy
-    Type: String
-    Default: "v0.0.2"
-  BucketName:
-    Description: Name of the bucket containing the webapp
-    Type: String
-    Default: "cert.wefald.no"
+    Repo:
+        Description: Repo where buildt code is kept
+        Type: String
+        Default: "repo.wefald.no"
+    Version:
+        Description: The version of app to deploy
+        Type: String
+        Default: "v0.0.2"
+    BucketName:
+        Description: Name of the bucket containing the webapp
+        Type: String
+        Default: "cert.wefald.no"
 
 Resources:
-  # Cognito
+    # Cognito
+    CertSearchUserPool:
+        Type: AWS::Cognito::UserPool
+        Properties:
+            UserPoolName: certSearchPool
 
-  # This does not provide everything needed. These additional steps is needed to set up Oauth:
-  # 1. Go to App Integration -> Domain Name and choose a domain name.
-  # 2. Go to App Integration -> Resource Servers add a resource server and define scopes. (Eg. cert/searchCert)
-  # 3. Go to App Integration -> App Client Settings, check Cognito User Pool, check Client Credentials and choose your scope under Allowed Custom scopes
+    Domain:
+        Type: AWS::Cognito::UserPoolDomain
+        Properties:
+            Domain: certsearch
+            UserPoolId: !Ref CertSearchUserPool
 
-  CertSearchUserPool:
-    Type: AWS::Cognito::UserPool
-    Properties:
-      UserPoolName: "certSearchPool"
+    ResourceServer:
+        Type: AWS::Cognito::UserPoolResourceServer
+        Properties:
+            Identifier: cert
+            Name: Cert
+            Scopes:
+                -   ScopeDescription: Search scope
+                    ScopeName: search
+            UserPoolId: !Ref CertSearchUserPool
 
-  CertSearchClient:
-    Type: "AWS::Cognito::UserPoolClient"
-    Properties:
-      ClientName: "certSearchClient"
-      GenerateSecret: true
-      UserPoolId: !Ref CertSearchUserPool
-      RefreshTokenValidity: 7
+    CertSearchClient:
+        DependsOn:
+            - ResourceServer
+        Type: AWS::Cognito::UserPoolClient
+        Properties:
+            AllowedOAuthFlows:
+                - client_credentials
+            AllowedOAuthFlowsUserPoolClient: true
+            AllowedOAuthScopes:
+                - cert/search
+            ClientName: certSearchClient
+            GenerateSecret: true
+            UserPoolId: !Ref CertSearchUserPool
+            RefreshTokenValidity: 7
+            SupportedIdentityProviders:
+                - COGNITO
 
-# Lambda
-  LambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: "Allow"
-            Principal:
-              Service: "lambda.amazonaws.com"
-            Action: "sts:AssumeRole"
-      Path: "/"
-      Policies:
-        - PolicyName: "logging"
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: "Allow"
-                Action: [
-                  "logs:CreateLogGroup",
-                  "logs:CreateLogStream",
-                  "logs:PutLogEvents"
-                ]
-                Resource: [
-                  "arn:aws:logs:*:*:*"
-                ]
+    # Lambda
+    LambdaRole:
+        Type: AWS::IAM::Role
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -   Effect: "Allow"
+                        Principal:
+                            Service: "lambda.amazonaws.com"
+                        Action: "sts:AssumeRole"
+            Path: "/"
+            Policies:
+                -   PolicyName: "logging"
+                    PolicyDocument:
+                        Version: "2012-10-17"
+                        Statement:
+                            -   Effect: "Allow"
+                                Action: [
+                                    "logs:CreateLogGroup",
+                                    "logs:CreateLogStream",
+                                    "logs:PutLogEvents"
+                                ]
+                                Resource: [
+                                    "arn:aws:logs:*:*:*"
+                                ]
 
-  CertSearchLambda:
-    Type: "AWS::Lambda::Function"
-    Properties:
-      FunctionName: "certSearchLambda"
-      Code:
-        S3Bucket: !Ref Repo
-        S3Key: !Sub "certSearch/lambda/certsearch-${Version}-lambda-deployment.zip"
-      Handler: "main"
-      MemorySize: 512
-      Role: !GetAtt LambdaRole.Arn
-      Runtime: "go1.x"
-      Timeout: 30
+    CertSearchLambda:
+        Type: "AWS::Lambda::Function"
+        Properties:
+            FunctionName: "certSearchLambda"
+            Code:
+                S3Bucket: !Ref Repo
+                S3Key: !Sub "certSearch/lambda/certsearch-${Version}-lambda-deployment.zip"
+            Handler: "main"
+            MemorySize: 512
+            Role: !GetAtt LambdaRole.Arn
+            Runtime: "go1.x"
+            Timeout: 30
 
-  ApiLambdaPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: "lambda:InvokeFunction"
-      FunctionName: !GetAtt CertSearchLambda.Arn
-      Principal: "apigateway.amazonaws.com"
+    ApiLambdaPermission:
+        Type: AWS::Lambda::Permission
+        Properties:
+            Action: "lambda:InvokeFunction"
+            FunctionName: !GetAtt CertSearchLambda.Arn
+            Principal: "apigateway.amazonaws.com"
 
-  # Api Gateway
-  
-  #  Enable cors to run the webapp locally. Easiest is to do it manually in the environment you want to test againts.
+    # Api Gateway
 
-  CertSearchAPI:
-    Type: AWS::ApiGateway::RestApi
-    Properties:
-      Name: "CertSearchAPI"
-      EndpointConfiguration:
-        Types:
-          - REGIONAL
+    #  Enable cors to run the webapp locally. Easiest is to do it manually in the environment you want to test againts.
 
-  ApiAuthorizer:
-    Type: AWS::ApiGateway::Authorizer
-    Properties:
-      IdentitySource: "method.request.header.Authorization"
-      Name: "certAuthorizer"
-      ProviderARNs:
-        - !GetAtt CertSearchUserPool.Arn
-      RestApiId: !Ref CertSearchAPI
-      Type: COGNITO_USER_POOLS
-  
-  ApiMethod:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      AuthorizerId: !Ref ApiAuthorizer
-      AuthorizationType: COGNITO_USER_POOLS
-      AuthorizationScopes:
-        - "cert/search"
-      HttpMethod: POST
-      Integration:
-        Type: AWS
-        IntegrationHttpMethod: POST
-        Uri: !Join [ "", [!Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/", !GetAtt CertSearchLambda.Arn, "/invocations" ]]
-        IntegrationResponses:
-          - StatusCode: 200
-      MethodResponses:
-        - StatusCode: 200
-          ResponseModels:
-            application/json: "Empty"
-      ResourceId: !GetAtt CertSearchAPI.RootResourceId
-      RestApiId: !Ref CertSearchAPI
+    CertSearchAPI:
+        Type: AWS::ApiGateway::RestApi
+        Properties:
+            Name: "CertSearchAPI"
+            EndpointConfiguration:
+                Types:
+                    - REGIONAL
 
-  ApiDeployment:
-    DependsOn: ApiMethod
-    Type: AWS::ApiGateway::Deployment
-    Properties:
-      RestApiId: !Ref CertSearchAPI
+    ApiAuthorizer:
+        Type: AWS::ApiGateway::Authorizer
+        Properties:
+            IdentitySource: "method.request.header.Authorization"
+            Name: "certAuthorizer"
+            ProviderARNs:
+                - !GetAtt CertSearchUserPool.Arn
+            RestApiId: !Ref CertSearchAPI
+            Type: COGNITO_USER_POOLS
 
-  ApiStage:
-    Type: AWS::ApiGateway::Stage
-    Properties:
-      CacheClusterEnabled: false
-      DeploymentId: !Ref ApiDeployment
-      RestApiId: !Ref CertSearchAPI
-      MethodSettings:
-        - ResourcePath: /
-          HttpMethod: "POST"
-          ThrottlingBurstLimit: 50
-          ThrottlingRateLimit: 100
-      StageName: "Main"
+    ApiMethod:
+        Type: AWS::ApiGateway::Method
+        Properties:
+            AuthorizerId: !Ref ApiAuthorizer
+            AuthorizationType: COGNITO_USER_POOLS
+            AuthorizationScopes:
+                - "cert/search"
+            HttpMethod: POST
+            Integration:
+                Type: AWS
+                IntegrationHttpMethod: POST
+                Uri: !Join [ "", [!Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/", !GetAtt CertSearchLambda.Arn, "/invocations" ]]
+                IntegrationResponses:
+                    -   StatusCode: 200
+            MethodResponses:
+                -   StatusCode: 200
+                    ResponseModels:
+                        application/json: "Empty"
+            ResourceId: !GetAtt CertSearchAPI.RootResourceId
+            RestApiId: !Ref CertSearchAPI
 
-# S3
-  WebappBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      AccessControl: PublicRead
-      BucketName: !Ref BucketName
-      WebsiteConfiguration: 
-        IndexDocument: "index.html"
+    ApiDeployment:
+        DependsOn: ApiMethod
+        Type: AWS::ApiGateway::Deployment
+        Properties:
+            RestApiId: !Ref CertSearchAPI
 
-  BucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      PolicyDocument:
-        Id: PublicObjectsPolicy
-        Version: "2012-10-17"
-        Statement:
-          - Effect: "Allow"
-            Principal: "*"
-            Action: [
-              "s3:GetObject"
-            ]
-            Resource: [
-              !Join ["", [!GetAtt WebappBucket.Arn, "/*"]]
-            ]
-      Bucket: !Ref WebappBucket
+    ApiStage:
+        Type: AWS::ApiGateway::Stage
+        Properties:
+            CacheClusterEnabled: false
+            DeploymentId: !Ref ApiDeployment
+            RestApiId: !Ref CertSearchAPI
+            MethodSettings:
+                -   ResourcePath: /
+                    HttpMethod: "POST"
+                    ThrottlingBurstLimit: 50
+                    ThrottlingRateLimit: 100
+            StageName: "Main"
+
+    # S3
+    WebappBucket:
+        Type: AWS::S3::Bucket
+        Properties:
+            AccessControl: PublicRead
+            BucketName: !Ref BucketName
+            WebsiteConfiguration:
+                IndexDocument: "index.html"
+
+    BucketPolicy:
+        Type: AWS::S3::BucketPolicy
+        Properties:
+            PolicyDocument:
+                Id: PublicObjectsPolicy
+                Version: "2012-10-17"
+                Statement:
+                    -   Effect: "Allow"
+                        Principal: "*"
+                        Action: [
+                            "s3:GetObject"
+                        ]
+                        Resource: [
+                        !Join ["", [!GetAtt WebappBucket.Arn, "/*"]]
+                        ]
+            Bucket: !Ref WebappBucket
